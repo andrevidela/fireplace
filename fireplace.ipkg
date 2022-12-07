@@ -16,13 +16,13 @@ package fireplace
 depends = pack
 
 -- modules to install
--- modules =
+modules = Fireplace
 
 -- main file (i.e. file to load at REPL)
--- main =
+main = Fireplace
 
 -- name of executable
--- executable =
+executable = fireplace
 -- opts =
 sourcedir = "src"
 -- builddir =
