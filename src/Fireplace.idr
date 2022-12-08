@@ -20,7 +20,7 @@ record BenchmarkResult where
 (.interval) : BenchmarkResult -> Clock Duration
 (.interval) r = r.end `timeDifference` r.start
 
--- ouputs the filepath of the compiler once it's been entirely bootstrapped from a given commit
+-- ouputs the compiler environement once it's been entirely bootstrapped from a given commit
 bootstrapCompiler : HasIO io => (commit : String) -> EitherT PackErr io IdrisEnv
 bootstrapCompiler commit = do
   packDir <- getPackDir
@@ -70,7 +70,11 @@ timeRunningTests library env = ?timeRunning
 
 partial
 main : IO ()
-main = do
-          compilerEnv <- runEitherT (bootstrapCompiler "lol")
-          printLn compilerEnv
-          pure ()
+main = do Right res <- the (IO (Either PackErr Unit)) (runEitherT (do
+                           compilerEnv <- (bootstrapCompiler "lol") 
+            s <- safe ?descT
+            result <- (libPkgTiming [] Build True [] ?desc)
+            pure ()
+            ))
+            | Left err => putStrLn "error"
+          putStrLn "finished"
