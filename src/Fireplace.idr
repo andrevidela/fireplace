@@ -9,8 +9,10 @@ import System.Clock
 import Pack.Core
 import Pack.Runner.Install
 import Pack.Runner.Database
+import Pack.Runner.Query
 import Pack.Config
 import Pack.Database.Types
+import Pack.CmdLn.Opts
 
 record BenchmarkResult where
   constructor MkResult
@@ -33,7 +35,7 @@ bootstrapCompiler commit = do
            , td  = tmpDir
            , ch  = libCache
            , lbf = lineBuffer}
-           (init {cur = cd, coll = latestCollection}) True
+           ({safetyPrompt := False} (init {cur = cd, coll = latestCollection}) ) True
 
   mkIdris
 
@@ -50,14 +52,17 @@ libPkgTiming env lvl cleanBuild cmd desc =
   let exe := idrisWithCG
       s   := exe ++ cmd ++ [desc.path.file]
    in do
+     liftIO (putStrLn "timing soon")
      pre <- (env ++) <$> buildEnv
      debug "About to run: \{escapeCmd s}"
      when cleanBuild (checkBuildDir desc)
 
      inDir (desc.path.parent) (\_ => do
+           liftIO (putStrLn "starting the timing")
            start <- liftIO $ clockTime Monotonic
-           val <- sysWithEnvAndLog lvl s pre
+           val <- sysWithEnv s pre
            end <- liftIO $ clockTime Monotonic
+           liftIO (putStrLn "timer end")
            pure (MkResult start end)
            )
 
@@ -70,11 +75,16 @@ timeRunningTests library env = ?timeRunning
 
 partial
 main : IO ()
-main = do Right res <- the (IO (Either PackErr Unit)) (runEitherT (do
-                           compilerEnv <- (bootstrapCompiler "lol") 
-            s <- safe ?descT
-            result <- (libPkgTiming [] Build True [] ?desc)
-            pure ()
+main = putStrLn "starting" *> the (IO (Either PackErr BenchmarkResult)) (runEitherT (do
+            liftIO (putStrLn "bootstrapping the compiler")
+            compilerEnv <- (bootstrapCompiler "lol")
+            allPackages <- resolveAll
+            -- get the list of all packages so that we can benchmark them all
+            -- putStrLn (unlines $ map (show . nameStr) allPackages)
+            liftIO (putStrLn "getting the library")
+            lib <- resolveLib (MkPkgName "pack") >>= safe . desc
+            liftIO (putStrLn "timing the library")
+            libPkgTiming [] Build True [] lib
             ))
-            | Left err => putStrLn "error"
-          putStrLn "finished"
+        >>= (\case (Left err) => putStrLn "error"
+                   (Right time) => putStrLn "finished in: \{show time.interval}")
