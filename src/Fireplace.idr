@@ -81,10 +81,13 @@ main = putStrLn "starting" *> the (IO (Either PackErr BenchmarkResult)) (runEith
             allPackages <- resolveAll
             -- get the list of all packages so that we can benchmark them all
             -- putStrLn (unlines $ map (show . nameStr) allPackages)
+            let libs@(head :: tail) = map name allPackages
             liftIO (putStrLn "getting the library")
-            lib <- resolveLib (MkPkgName "pack") >>= safe . desc
+            lib <- resolveLib head >>= safe . desc
+            liftIO (putStrLn "installing everything")
+            installDeps lib
             liftIO (putStrLn "timing the library")
-            libPkgTiming [] Build True [] lib
+            libPkgTiming [] Build True ["--typecheck"] lib
             ))
         >>= (\case (Left err) => putStrLn "error"
                    (Right time) => putStrLn "finished in: \{show time.interval}")
