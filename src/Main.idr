@@ -8,6 +8,7 @@ import Pack.Config.Types
 import Pack.Config.Environment
 import Pack.CmdLn.Types
 import Pack.Database.Types
+import Pack.Runner.Database
 import Pack.Core
 import Pack.Core.IO
 
@@ -93,19 +94,42 @@ time io = do
 obtainPackages : IdrisEnv -> (List PkgName)
 obtainPackages x = keys x.env.db.packages
 
-runTests : {auto env : IdrisEnv} -> (pkgs : List PkgName) -> PIO (Results pkgs 1)
-runTests [] = pure (MkResults [])
-runTests (package :: rest) = do
-  val <- time $ runTest package [] env
-  rec <- runTests rest
-  pure (MkResults ([snd val] :: results rec))
+typecheckSingle : IdrisEnv => PkgName -> PIO (Clock Duration)
+typecheckSingle p = do
+  lib  <- resolveLib p
+  slib <- safeLib lib
+  installDeps (slib.desc)
+  withPkgEnv slib.name slib.pkg $ \_ => do
+    snd <$> time (libPkg [] Build True ["--typecheck"] slib.desc)
 
 runTypecheck : {auto env : IdrisEnv} -> (pkgs : List PkgName) -> PIO (Results pkgs 1)
 runTypecheck [] = pure (MkResults [])
 runTypecheck (package :: rest) = do
-  val <- time $ typecheck (Pkg package) env
+  val <- typecheckSingle package
   rec <- runTypecheck rest
-  pure (MkResults ([snd val] :: results rec))
+  pure (MkResults ([val] :: results rec))
+
+export covering
+runTestLocal :
+     PkgName
+  -> (args : CmdArgList)
+  -> IdrisEnv
+  -> EitherT PackErr IO (Clock Duration)
+runTestLocal n args e = case lookup n allPackages of
+  Nothing                     => throwE (UnknownPkg n)
+  Just (Git u c _ _ $ Just t) => do
+    d <- withGit n u c pure
+    snd <$> time (runIpkg (d </> t) args e)
+  Just (Local d _ _ $ Just t) => snd <$> time (runIpkg (d </> t) args e)
+  Just _                      => pure $ makeDuration 0 0
+
+
+runTests : {auto env : IdrisEnv} -> (pkgs : List PkgName) -> PIO (Results pkgs 1)
+runTests [] = pure (MkResults [])
+runTests (package :: rest) = do
+  val <- runTestLocal package [] env
+  rec <- runTests rest
+  pure (MkResults ([val] :: results rec))
 
 runMain : {auto env : IdrisEnv} -> String -> (pkgs : List PkgName) -> (m : BenchmarkMode) -> PIO (Results pkgs (resultCount m))
 runMain file pkgs (RuntimeBenchmarks x) = runTests pkgs
@@ -136,12 +160,13 @@ withIdrisEnv mc f = do
     idrisEnv (mc cd) True >>= f
 
 getConfig : String -> CurDir -> MetaConfig
-getConfig collection x = { logLevel := Debug } (init (MkDBName "nightly-230831"))
+getConfig collection x = { safetyPrompt := False, logLevel := Debug } (init (MkDBName "nightly-230831"))
 
 
 main : IO ()
 main = readOptions >>= \opts => run $ withIdrisEnv (getConfig opts.packCollection) $ \env => do
-  let packages = obtainPackages env
+  let packages = ["json", "tyttp", "pack"]-- obtainPackages env
+  -- installLibs packages
   resultsFileName <- liftIO $ getFileName opts.fileName
   (MkResults resultTable) <- runMain resultsFileName packages opts.mode
   liftIO $ writeCSV {key = PkgName} resultTable
